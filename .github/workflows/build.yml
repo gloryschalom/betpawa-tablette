@@ -1,0 +1,253 @@
+name: Build APK
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+env:
+  SITE_URL: https://www.betpawa.com
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Creer le projet
+        run: |
+          mkdir -p app/src/main/java/com/siteapp/betpawa app/src/main/res/drawable app/src/main/res/values app/src/main/assets
+          cat > settings.gradle <<'EOF'
+          pluginManagement {
+              repositories { google(); mavenCentral(); gradlePluginPortal() }
+          }
+          dependencyResolutionManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  maven { url 'https://download.01.org/crosswalk/releases/crosswalk/android/maven2' }
+              }
+          }
+          rootProject.name = 'BetpawaTablette'
+          include ':app'
+          EOF
+          cat > build.gradle <<'EOF'
+          plugins {
+              id 'com.android.application' version '7.4.2' apply false
+          }
+          EOF
+          cat > gradle.properties <<'EOF'
+          org.gradle.jvmargs=-Xmx2g
+          EOF
+          cat > app/build.gradle <<'EOF'
+          plugins {
+              id 'com.android.application'
+          }
+
+          android {
+              namespace 'com.siteapp.betpawa'
+              compileSdk 33
+
+              defaultConfig {
+                  applicationId "com.siteapp.betpawa"
+                  minSdk 16
+                  targetSdk 21
+                  versionCode 1
+                  versionName "1.0"
+                  ndk { abiFilters 'armeabi-v7a' }
+              }
+
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_1_8
+                  targetCompatibility JavaVersion.VERSION_1_8
+              }
+          }
+
+          dependencies {
+              implementation 'org.xwalk:xwalk_core_library:23.53.589.4'
+          }
+          EOF
+          cat > app/src/main/AndroidManifest.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <uses-permission android:name="android.permission.INTERNET" />
+              <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+              <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+
+              <application
+                  android:label="Betpawa"
+                  android:icon="@drawable/ic_launcher"
+                  android:hardwareAccelerated="true"
+                  android:theme="@style/AppTheme">
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true"
+                      android:configChanges="orientation|screenSize|keyboardHidden">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          EOF
+          cat > app/src/main/res/values/styles.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <color name="fond">#00552B</color>
+              <style name="AppTheme" parent="@android:style/Theme.Black.NoTitleBar.Fullscreen">
+                  <item name="android:windowBackground">@color/fond</item>
+              </style>
+          </resources>
+          EOF
+          cat > app/src/main/assets/offline.html <<'EOF'
+          <!DOCTYPE html>
+          <html><head><meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1">
+          <style>
+          body{margin:0;background:#00552B;color:#fff;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;text-align:center}
+          h2{margin:0 0 10px}p{margin:0 0 24px;opacity:.85}
+          a{display:inline-block;background:#fff;color:#00552B;padding:14px 28px;border-radius:8px;text-decoration:none;font-weight:bold}
+          </style></head>
+          <body><div>
+          <h2>Pas de connexion</h2>
+          <p>Vérifie le Wi-Fi ou les données mobiles.</p>
+          <a href="__URL__">Réessayer</a>
+          </div></body></html>
+          EOF
+          cat > app/src/main/java/com/siteapp/betpawa/MainActivity.java <<'EOF'
+          package com.siteapp.betpawa;
+
+          import android.content.Context;
+          import android.net.ConnectivityManager;
+          import android.net.NetworkInfo;
+          import android.os.Bundle;
+          import android.view.WindowManager;
+          import org.xwalk.core.XWalkActivity;
+          import org.xwalk.core.XWalkNavigationHistory;
+          import org.xwalk.core.XWalkResourceClient;
+          import org.xwalk.core.XWalkView;
+
+          public class MainActivity extends XWalkActivity {
+              private static final String URL = "__URL__";
+              private XWalkView view;
+
+              @Override
+              protected void onCreate(Bundle savedInstanceState) {
+                  super.onCreate(savedInstanceState);
+                  getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+              }
+
+              private boolean enLigne() {
+                  ConnectivityManager cm = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+                  NetworkInfo ni = cm == null ? null : cm.getActiveNetworkInfo();
+                  return ni != null && ni.isConnected();
+              }
+
+              @Override
+              protected void onXWalkReady() {
+                  view = new XWalkView(this, this);
+                  view.setResourceClient(new XWalkResourceClient(view) {
+                      @Override
+                      public void onReceivedLoadError(XWalkView v, int errorCode, String description, String failingUrl) {
+                          super.onReceivedLoadError(v, errorCode, description, failingUrl);
+                          if (!enLigne()) {
+                              v.load("file:///android_asset/offline.html", null);
+                          }
+                      }
+                  });
+                  setContentView(view);
+                  if (enLigne()) {
+                      view.load(URL, null);
+                  } else {
+                      view.load("file:///android_asset/offline.html", null);
+                  }
+              }
+
+              @Override
+              public void onBackPressed() {
+                  if (view != null && view.getNavigationHistory().canGoBack()) {
+                      view.getNavigationHistory().navigate(XWalkNavigationHistory.Direction.BACKWARD, 1);
+                  } else {
+                      super.onBackPressed();
+                  }
+              }
+
+              @Override
+              protected void onPause() {
+                  super.onPause();
+                  if (view != null) view.pauseTimers();
+              }
+
+              @Override
+              protected void onResume() {
+                  super.onResume();
+                  if (view != null) view.resumeTimers();
+              }
+
+              @Override
+              protected void onDestroy() {
+                  super.onDestroy();
+                  if (view != null) view.onDestroy();
+              }
+          }
+          EOF
+          base64 -d > app/src/main/res/drawable/ic_launcher.png <<'EOF'
+          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
+          EOF
+          sed -i "s|__URL__|$SITE_URL|g" app/src/main/java/com/siteapp/betpawa/MainActivity.java app/src/main/assets/offline.html
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: '7.6.4'
+      - run: gradle assembleDebug --no-daemon
+      - uses: actions/upload-artifact@v4
+        with:
+          name: betpawa-apk
+          path: app/build/outputs/apk/debug/*.apk
